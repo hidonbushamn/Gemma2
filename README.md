@@ -5,3 +5,5 @@ Besides, keep in mind that the shape of the tensor for labels should be in corre
 These datasets contains labels in the form of 0/1
 
 Remember when saving models to local, keep the precision identical(load model in bf16 to save it to local)
+
+For sequence classification tasks, torch.eq(outputs.logits.argmax(dim=1),batch['lm_labels']).float().sum() could be used to calculate accurate number
