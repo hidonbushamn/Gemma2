@@ -1,1 +1,2 @@
-There are some problems while training Gemma2 on GPU, which would result in the nan loss.
+There are some problems with the default attention implementation.
+We should use flash attention2 instead of the default one.
