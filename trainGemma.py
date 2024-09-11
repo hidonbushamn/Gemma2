@@ -9,8 +9,7 @@ from torch.optim import lr_scheduler
 from lightning.pytorch.trainer import Trainer
 from lightning.pytorch.core import LightningDataModule,LightningModule
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
-import huggingface_hub
-huggingface_hub.login("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") # token 从 https://huggingface.co/settings/tokens 获取
+
 
 class BorderDataset(Dataset):
 
@@ -24,7 +23,7 @@ class BorderDataset(Dataset):
     def __getitem__(self, index):
 
         source_encoding=self.tokenizer(self.data.text.iloc[index]+'<eos>', return_tensors='pt',padding='max_length',max_length=560)
-        target=torch.tensor([self.data.label.iloc[index]])
+        target=torch.tensor(self.data.label.iloc[index])
         
 
         return dict(
@@ -97,7 +96,7 @@ class GemmaFineTuner(LightningModule):
         loss=outputs.loss
         
         self.log('train_loss',loss,on_step=True,on_epoch=True,prog_bar=True,logger=True)
-        self.training_step_outputs.append(outputs[0])
+        self.training_step_outputs.append(loss)
         return loss
     
     def on_train_epoch_end(self):
@@ -113,15 +112,23 @@ class GemmaFineTuner(LightningModule):
             lm_labels=batch['lm_labels']
         )
         loss=outputs.loss
-        self.validation_step_outputs.append(outputs[0])
+        self.validation_step_outputs.append(loss)
+        self.validation_step_answer=self.validation_step_answer+torch.eq(outputs.logits.argmax(dim=1),batch['lm_labels']).float().sum()
+        self.log('val_loss',loss,on_step=True,on_epoch=True,prog_bar=True,logger=True)
         return loss
 
     def on_validation_epoch_end(self):
         num=len(val)
         avg_val_loss = torch.stack([x for x in self.validation_step_outputs]).mean()
+        acc=self.validation_step_answer/num
+        print("********\n")
+        print(acc)
+        print("********\n")
+        self.log('val_acc',acc,on_epoch=True,prog_bar=True,logger=True)
         self.validation_step_outputs.clear()
-        tensorboard_logs = {"avg_val_loss": avg_val_loss}
-        return {"avg_val_loss": avg_val_loss, "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
+        self.validation_step_answer=0
+        tensorboard_logs = {"avg_val_loss": avg_val_loss,'avg_val_acc':acc}
+        return {"avg_val_loss": avg_val_loss, "avg_val_acc":acc, "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
     
     def test_step(self,batch,batch_idx):
         outputs = self.forward(
@@ -130,14 +137,22 @@ class GemmaFineTuner(LightningModule):
             lm_labels=batch['lm_labels']
         )
         loss=outputs.loss
-        self.test_step_outputs.clear()
+        self.test_step_outputs.append(loss)
+        self.test_step_answer=self.test_step_answer+torch.eq(outputs.logits.argmax(dim=1),batch['lm_labels']).float().sum()
+        self.log('test_loss',loss,on_step=True,on_epoch=True,prog_bar=True,logger=True)
         return loss
     
     def on_test_epoch_end(self):
         num=len(val)
         avg_test_loss = torch.stack([x for x in self.test_step_outputs]).mean()
+        acc=self.test_step_answer/num
+        print("********\n")
+        print(acc)
+        print("********\n")
+        self.log('test_acc',acc,on_epoch=True,prog_bar=True,logger=True)
         self.test_step_outputs.clear()
-        tensorboard_logs ={"avg_test_loss":avg_test_loss}
+        self.test_step_answer=0
+        tensorboard_logs ={"avg_test_loss":avg_test_loss,"avg_test_acc":acc}
         return {"avg_test_loss": avg_test_loss,"log": tensorboard_logs, 'progress_bar': tensorboard_logs}
     
     def predict_step(self,batch):
